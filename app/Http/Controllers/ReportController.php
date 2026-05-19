@@ -18,19 +18,22 @@ class ReportController extends Controller
 {
     public function activeInventory(Request $request): View
     {
-        $allProducts = Product::query()->orderBy('category')->orderBy('name')->get();
-        $products = Product::query()->orderBy('category')->orderBy('name')->paginate(10);
+        $userId = auth()->id();
+        $allProducts = Product::query()->where('user_id', $userId)->orderBy('category')->orderBy('name')->get();
+        $products = Product::query()->where('user_id', $userId)->orderBy('category')->orderBy('name')->paginate(10);
 
         return view('reports.active', compact('products', 'allProducts'));
     }
 
     public function daily(Request $request): View
     {
+        $userId = auth()->id();
         $date = Carbon::parse($request->input('date', today()->toDateString()));
-        InventoryRecord::rebuildForDate($date);
+        InventoryRecord::rebuildForDate($date, $userId);
 
         $records = InventoryRecord::query()
             ->with('product')
+            ->whereHas('product', fn ($query) => $query->where('user_id', $userId))
             ->whereDate('inventory_date', $date)
             ->get()
             ->sortBy('product.name')
@@ -57,21 +60,23 @@ class ReportController extends Controller
         ]);
 
         $date = Carbon::parse($data['date']);
+        $userId = auth()->id();
 
         if ($date->isFuture()) {
             return back()->withErrors(['date' => 'You cannot edit stock-out values for future dates.']);
         }
 
-        InventoryRecord::rebuildForDate($date);
+        InventoryRecord::rebuildForDate($date, $userId);
         $records = InventoryRecord::query()
+            ->whereHas('product', fn ($query) => $query->where('user_id', $userId))
             ->whereDate('inventory_date', $date)
             ->get()
             ->keyBy('product_id');
 
         try {
-            DB::transaction(function () use ($data, $date, $records): void {
+            DB::transaction(function () use ($data, $date, $records, $userId): void {
                 foreach ($data['rows'] as $productId => $row) {
-                    $product = Product::query()->lockForUpdate()->findOrFail($productId);
+                    $product = Product::query()->where('user_id', $userId)->lockForUpdate()->findOrFail($productId);
                     $record = $records->get($productId);
 
                     if (! $record) {
@@ -98,7 +103,7 @@ class ReportController extends Controller
             return back()->withErrors(['rows' => $exception->getMessage()]);
         }
 
-        InventoryRecord::rebuildForDate($date);
+        InventoryRecord::rebuildForDate($date, $userId);
 
         return redirect()
             ->route('reports.daily', ['date' => $date->toDateString()])
@@ -107,11 +112,13 @@ class ReportController extends Controller
 
     public function exportDaily(Request $request): StreamedResponse
     {
+        $userId = auth()->id();
         $date = Carbon::parse($request->input('date', today()->toDateString()));
-        InventoryRecord::rebuildForDate($date);
+        InventoryRecord::rebuildForDate($date, $userId);
 
         $records = InventoryRecord::query()
             ->with('product')
+            ->whereHas('product', fn ($query) => $query->where('user_id', $userId))
             ->whereDate('inventory_date', $date)
             ->get()
             ->sortBy('product.name');
@@ -189,7 +196,7 @@ class ReportController extends Controller
             'include_in_costing' => $includeInCosting,
             'unit_price' => $unitPrice,
             'total_cost' => $type === 'Out' && $includeInCosting ? $quantity * $unitPrice : 0,
-            'user_id' => $this->systemUser()->id,
+            'user_id' => auth()->id() ?? $this->systemUser()->id,
             'created_at' => $date->copy()->setTimeFrom(now()),
             'updated_at' => $date->copy()->setTimeFrom(now()),
         ]);
@@ -205,10 +212,12 @@ class ReportController extends Controller
 
     public function monthly(Request $request): View
     {
+        $userId = auth()->id();
         $month = Carbon::parse($request->input('month', today()->format('Y-m')).'-01');
-        $products = Product::query()->orderBy('name')->get();
+        $products = Product::query()->where('user_id', $userId)->orderBy('name')->get();
         $movements = StockMovement::query()
             ->with('product')
+            ->whereHas('product', fn ($query) => $query->where('user_id', $userId))
             ->where('type', 'Out')
             ->whereBetween('created_at', [$month->copy()->startOfMonth(), $month->copy()->endOfMonth()])
             ->get();
@@ -244,9 +253,11 @@ class ReportController extends Controller
 
     public function costing(Request $request): View
     {
+        $userId = auth()->id();
         $month = Carbon::parse($request->input('month', today()->format('Y-m')).'-01');
         $movements = StockMovement::query()
             ->with('product')
+            ->whereHas('product', fn ($query) => $query->where('user_id', $userId))
             ->where('type', 'Out')
             ->whereBetween('created_at', [$month->copy()->startOfMonth(), $month->copy()->endOfMonth()])
             ->get();
@@ -302,9 +313,11 @@ class ReportController extends Controller
 
     private function costingAuditPdf(Request $request, bool $download): Response
     {
+        $userId = auth()->id();
         $month = Carbon::parse($request->input('month', today()->format('Y-m')).'-01');
         $movements = StockMovement::query()
             ->with('product')
+            ->whereHas('product', fn ($query) => $query->where('user_id', $userId))
             ->where('type', 'Out')
             ->whereBetween('created_at', [$month->copy()->startOfMonth(), $month->copy()->endOfMonth()])
             ->get();
@@ -397,7 +410,12 @@ class ReportController extends Controller
 
     public function history(Request $request): View
     {
-        $query = StockMovement::query()->with(['product', 'user'])->latest();
+        $userId = auth()->id();
+        $ownedProduct = fn ($query) => $query->where('user_id', $userId);
+        $query = StockMovement::query()
+            ->with(['product', 'user'])
+            ->whereHas('product', $ownedProduct)
+            ->latest();
 
         if ($request->filled('search')) {
             $search = $request->string('search')->toString();
@@ -419,7 +437,13 @@ class ReportController extends Controller
         }
 
         if ($request->filled('product_id')) {
-            $query->where('product_id', $request->input('product_id'));
+            $ownedProductIds = Product::query()->where('user_id', $userId)->pluck('id');
+
+            if ($ownedProductIds->contains($request->input('product_id'))) {
+                $query->where('product_id', $request->input('product_id'));
+            } else {
+                $query->whereRaw('1 = 0');
+            }
         }
 
         if (in_array($request->input('type'), ['In', 'Out'], true)) {
@@ -432,8 +456,13 @@ class ReportController extends Controller
 
         return view('reports.history', [
             'movements' => $query->paginate(10)->withQueryString(),
-            'products' => Product::query()->orderBy('name')->get(),
-            'departments' => StockMovement::query()->select('department')->distinct()->orderBy('department')->pluck('department'),
+            'products' => Product::query()->where('user_id', $userId)->orderBy('name')->get(),
+            'departments' => StockMovement::query()
+                ->whereHas('product', $ownedProduct)
+                ->select('department')
+                ->distinct()
+                ->orderBy('department')
+                ->pluck('department'),
             'filters' => $request->only(['search', 'date_from', 'date_to', 'product_id', 'type', 'department']),
         ]);
     }

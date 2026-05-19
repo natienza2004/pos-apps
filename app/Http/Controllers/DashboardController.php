@@ -12,9 +12,13 @@ class DashboardController extends Controller
 {
     public function __invoke(Request $request): View
     {
-        $products = Product::query()->orderBy('name')->get();
+        $userId = auth()->id();
+        $ownedProduct = fn ($query) => $query->where('user_id', $userId);
+
+        $products = Product::query()->where('user_id', $userId)->orderBy('name')->get();
         $today = Carbon::today();
         $latestStockOutDate = StockMovement::query()
+            ->whereHas('product', $ownedProduct)
             ->where('type', 'Out')
             ->max('created_at');
         $defaultTrendEnd = $latestStockOutDate
@@ -40,12 +44,14 @@ class DashboardController extends Controller
 
         $todaysMovements = StockMovement::query()
             ->with('product')
+            ->whereHas('product', $ownedProduct)
             ->where('type', 'Out')
             ->whereDate('created_at', $today)
             ->get();
 
         $trendMovements = StockMovement::query()
             ->with('product')
+            ->whereHas('product', $ownedProduct)
             ->where('type', 'Out')
             ->whereBetween('created_at', [$trendStart->copy()->startOfDay(), $trendEnd->copy()->endOfDay()])
             ->get();
@@ -104,7 +110,7 @@ class DashboardController extends Controller
             'selectedYear' => $selectedYear,
             'availableYears' => range($today->copy()->subYears(3)->year, $today->copy()->addYears(1)->year),
             'filteredTotalCost' => $filteredTotalCost,
-            'recentMovements' => StockMovement::query()->with(['product', 'user'])->latest()->limit(8)->get(),
+            'recentMovements' => StockMovement::query()->with(['product', 'user'])->whereHas('product', $ownedProduct)->latest()->limit(8)->get(),
             'statusCards' => $products->sortBy('current_stock')->take(8),
         ]);
     }

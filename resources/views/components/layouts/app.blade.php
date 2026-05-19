@@ -51,6 +51,9 @@
         .notification-item strong { display: block; font-size: 13px; }
         .notification-item span { display: block; margin-top: 3px; color: #64748b; font-size: 11px; }
         .notification-empty { padding: 24px 16px; color: #64748b; text-align: center; }
+        .logout-form { margin: 0; }
+        .logout-btn { width: 34px; height: 34px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: #64748b; display: grid; place-items: center; cursor: pointer; }
+        .logout-btn svg { width: 15px; height: 15px; }
         .content { grid-column: 2; padding: 112px 32px 48px; }
         .container { width: min(1220px, 100%); margin: 0 auto; }
         .page-head { display: flex; align-items: start; justify-content: space-between; gap: 20px; margin-bottom: 28px; }
@@ -189,6 +192,7 @@
             @php
                 $formatQuantity = fn ($value): string => rtrim(rtrim(number_format((float) $value, 3, '.', ','), '0'), '.');
                 $stockAlerts = \App\Models\Product::query()
+                    ->where('user_id', auth()->id())
                     ->whereColumn('current_stock', '<=', 'low_stock_threshold')
                     ->orderBy('current_stock')
                     ->orderBy('name')
@@ -222,6 +226,12 @@
                         </div>
                     </div>
                 </div>
+                <span style="height:32px;border-left:1px solid var(--line)"></span>
+                <div style="text-align:right"><strong>{{ auth()->user()->name }}</strong><br><span class="muted">{{ auth()->user()->role }}</span></div>
+                <form method="POST" action="{{ route('logout') }}" class="logout-form">
+                    @csrf
+                    <button class="logout-btn" type="submit" title="Logout" aria-label="Logout"><i data-lucide="log-out"></i></button>
+                </form>
             </div>
         </header>
 

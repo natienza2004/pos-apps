@@ -10,36 +10,44 @@ use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 
 class StockMovementController extends Controller
 {
     public function index(): View
     {
+        $userId = auth()->id();
+
         return view('movements.index', [
-            'products' => Product::query()->orderBy('name')->get(),
-            'movements' => StockMovement::query()->with(['product', 'user'])->latest()->paginate(10),
+            'products' => Product::query()->where('user_id', $userId)->orderBy('name')->get(),
+            'movements' => StockMovement::query()
+                ->with(['product', 'user'])
+                ->whereHas('product', fn ($query) => $query->where('user_id', $userId))
+                ->latest()
+                ->paginate(10),
         ]);
     }
 
     public function stockIn(): View
     {
         return view('movements.stock-in', [
-            'products' => Product::query()->orderBy('name')->get(),
+            'products' => Product::query()->where('user_id', auth()->id())->orderBy('name')->get(),
         ]);
     }
 
     public function stockOut(): View
     {
         return view('movements.stock-out', [
-            'products' => Product::query()->orderBy('name')->get(),
+            'products' => Product::query()->where('user_id', auth()->id())->orderBy('name')->get(),
         ]);
     }
 
     public function store(Request $request): RedirectResponse
     {
+        $userId = auth()->id();
         $data = $request->validate([
-            'product_id' => ['required', 'exists:products,id'],
+            'product_id' => ['required', Rule::exists('products', 'id')->where(fn ($query) => $query->where('user_id', $userId))],
             'type' => ['required', 'in:In,Out'],
             'quantity' => ['required', 'numeric', 'min:0.001'],
             'department' => ['required', 'string', 'max:100'],
@@ -50,8 +58,8 @@ class StockMovementController extends Controller
         ]);
 
         try {
-            DB::transaction(function () use ($data): void {
-                $product = Product::query()->lockForUpdate()->findOrFail($data['product_id']);
+            DB::transaction(function () use ($data, $userId): void {
+                $product = Product::query()->where('user_id', $userId)->lockForUpdate()->findOrFail($data['product_id']);
                 $quantity = (float) $data['quantity'];
                 $movementDate = Carbon::parse($data['movement_date']);
 
@@ -82,7 +90,7 @@ class StockMovementController extends Controller
                     'include_in_costing' => $includeInCosting,
                     'unit_price' => $unitPrice,
                     'total_cost' => $data['type'] === 'Out' && $includeInCosting ? $quantity * $unitPrice : 0,
-                    'user_id' => $this->systemUser()->id,
+                    'user_id' => $userId ?? $this->systemUser()->id,
                     'created_at' => $movementAt,
                     'updated_at' => $movementAt,
                 ]);
@@ -93,15 +101,19 @@ class StockMovementController extends Controller
             return back()->withErrors(['quantity' => $exception->getMessage()])->withInput();
         }
 
-        InventoryRecord::rebuildForDate(Carbon::parse($request->input('movement_date')));
+        InventoryRecord::rebuildForDate(Carbon::parse($request->input('movement_date')), $userId);
 
         return back()->with('success', $data['type'] === 'In' ? 'Stock added.' : 'Stock released.');
     }
 
     public function update(Request $request, StockMovement $movement): RedirectResponse
     {
+        $userId = auth()->id();
+        $movement->loadMissing('product');
+        abort_unless($movement->product?->user_id === $userId, 404);
+
         $data = $request->validate([
-            'product_id' => ['required', 'exists:products,id'],
+            'product_id' => ['required', Rule::exists('products', 'id')->where(fn ($query) => $query->where('user_id', $userId))],
             'quantity' => ['required', 'numeric', 'min:0.001'],
             'department' => ['required', 'string', 'max:100'],
             'reason' => ['nullable', 'string', 'max:255'],
@@ -115,10 +127,10 @@ class StockMovementController extends Controller
         $movementDate = Carbon::parse($data['movement_date']);
 
         try {
-            DB::transaction(function () use ($data, $movement, $movementDate, $oldProductId): void {
-                $product = Product::query()->lockForUpdate()->findOrFail($data['product_id']);
+            DB::transaction(function () use ($data, $movement, $movementDate, $oldProductId, $userId): void {
+                $product = Product::query()->where('user_id', $userId)->lockForUpdate()->findOrFail($data['product_id']);
                 if ($oldProductId !== $product->id) {
-                    Product::query()->lockForUpdate()->findOrFail($oldProductId);
+                    Product::query()->where('user_id', $userId)->lockForUpdate()->findOrFail($oldProductId);
                 }
 
                 $quantity = (float) $data['quantity'];
@@ -160,15 +172,15 @@ class StockMovementController extends Controller
                 $product->syncCurrentStock();
 
                 if ($oldProductId !== $product->id) {
-                    Product::query()->find($oldProductId)?->syncCurrentStock();
+                    Product::query()->where('user_id', $userId)->find($oldProductId)?->syncCurrentStock();
                 }
             });
         } catch (\RuntimeException $exception) {
             return back()->withErrors(['movement' => $exception->getMessage()]);
         }
 
-        InventoryRecord::rebuildForDate($oldDate);
-        InventoryRecord::rebuildForDate($movementDate);
+        InventoryRecord::rebuildForDate($oldDate, $userId);
+        InventoryRecord::rebuildForDate($movementDate, $userId);
 
         return back()->with('success', 'Movement updated.');
     }

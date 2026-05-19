@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Product;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 
 class ProductController extends Controller
@@ -14,6 +15,7 @@ class ProductController extends Controller
         $status = $request->input('status', 'all');
 
         $products = Product::query()
+            ->where('user_id', auth()->id())
             ->orderBy('category')
             ->orderBy('name')
             ->get()
@@ -30,6 +32,7 @@ class ProductController extends Controller
     public function store(Request $request): RedirectResponse
     {
         $data = $this->validated($request);
+        $data['user_id'] = auth()->id();
         $data['current_stock'] = $data['starting_stock'];
         $data['include_in_costing'] = $request->boolean('include_in_costing');
 
@@ -40,6 +43,8 @@ class ProductController extends Controller
 
     public function update(Request $request, Product $product): RedirectResponse
     {
+        $this->authorizeProduct($product);
+
         $data = $this->validated($request, $product);
         $data['include_in_costing'] = $request->boolean('include_in_costing');
 
@@ -62,6 +67,8 @@ class ProductController extends Controller
 
     public function destroy(Product $product): RedirectResponse
     {
+        $this->authorizeProduct($product);
+
         $product->delete();
 
         return back()->with('success', 'Product deleted.');
@@ -70,7 +77,14 @@ class ProductController extends Controller
     private function validated(Request $request, ?Product $product = null): array
     {
         return $request->validate([
-            'sku' => ['required', 'string', 'max:50', 'unique:products,sku,'.($product?->id ?? 'NULL').',id'],
+            'sku' => [
+                'required',
+                'string',
+                'max:50',
+                Rule::unique('products', 'sku')
+                    ->where(fn ($query) => $query->where('user_id', auth()->id()))
+                    ->ignore($product?->id),
+            ],
             'name' => ['required', 'string', 'max:255'],
             'category' => ['required', 'string', 'max:100'],
             'unit' => ['required', 'string', 'max:30'],
@@ -83,9 +97,14 @@ class ProductController extends Controller
 
     private function nextSku(): string
     {
-        $next = Product::query()->count() + 1;
+        $next = Product::query()->where('user_id', auth()->id())->count() + 1;
 
         return 'ITM-'.str_pad((string) $next, 3, '0', STR_PAD_LEFT);
+    }
+
+    private function authorizeProduct(Product $product): void
+    {
+        abort_unless($product->user_id === auth()->id(), 404);
     }
 
     private function paginateCollection($items, int $perPage, Request $request)

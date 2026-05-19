@@ -37,9 +37,13 @@ class SettingsController extends Controller
     public function reset(): RedirectResponse
     {
         DB::transaction(function (): void {
-            InventoryRecord::query()->delete();
-            StockMovement::query()->delete();
-            Product::query()->delete();
+            $productIds = Product::query()
+                ->where('user_id', auth()->id())
+                ->pluck('id');
+
+            InventoryRecord::query()->whereIn('product_id', $productIds)->delete();
+            StockMovement::query()->whereIn('product_id', $productIds)->delete();
+            Product::query()->whereIn('id', $productIds)->delete();
         });
 
         return back()->with('success', 'Inventory data reset.');
