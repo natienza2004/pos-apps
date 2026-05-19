@@ -60,8 +60,8 @@ class InventoryRecord extends Model
             $stockIn = $movements->where('type', 'In')->sum(fn (StockMovement $movement): float => (float) $movement->quantity);
             $kitchenOut = $movements->where('type', 'Out')->where('department', 'Kitchen')->sum(fn (StockMovement $movement): float => (float) $movement->quantity);
             $bakeryOut = $movements->where('type', 'Out')->where('department', 'Bakery')->sum(fn (StockMovement $movement): float => (float) $movement->quantity);
-            $kitchenCost = $product->include_in_costing ? $kitchenOut * (float) $product->price : 0;
-            $bakeryCost = $product->include_in_costing ? $bakeryOut * (float) $product->price : 0;
+            $kitchenCost = $movements->where('type', 'Out')->where('department', 'Kitchen')->sum(fn (StockMovement $movement): float => $movement->cost);
+            $bakeryCost = $movements->where('type', 'Out')->where('department', 'Bakery')->sum(fn (StockMovement $movement): float => $movement->cost);
 
             self::query()->updateOrCreate(
                 ['product_id' => $product->id, 'inventory_date' => $date->toDateString()],

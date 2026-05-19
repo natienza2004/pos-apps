@@ -1,17 +1,26 @@
 <x-layouts.app title="Stock Out | StockFlow">
+    @php
+        $formatQuantity = fn ($value): string => rtrim(rtrim(number_format((float) $value, 3, '.', ','), '0'), '.');
+    @endphp
+
     <div class="page-head" style="max-width:840px;margin-left:auto;margin-right:auto"><div><h1>Stock Out / Usage</h1><div class="sub">Record daily usage for Kitchen or Bakery departments.</div></div></div>
     <section class="grid" style="grid-template-columns:540px 250px;align-items:start;justify-content:center">
         <form method="POST" action="{{ route('movements.store') }}" class="card form-card" style="margin:0">
             @csrf
             <input type="hidden" name="type" value="Out">
             <label class="full">Select Product
-                <select name="product_id" required><option value="">Choose a product...</option>@foreach ($products as $product)<option value="{{ $product->id }}">{{ $product->name }} ({{ $product->current_stock }} {{ $product->unit }})</option>@endforeach</select>
+                <select name="product_id" required><option value="">Choose a product...</option>@foreach ($products as $product)<option value="{{ $product->id }}">{{ $product->name }} ({{ $formatQuantity($product->current_stock) }} {{ $product->unit }})</option>@endforeach</select>
             </label>
             <div class="form-grid" style="margin-top:22px">
                 <label>Usage Date<input type="date" name="movement_date" value="{{ old('movement_date', now()->format('Y-m-d')) }}" required></label>
                 <label>Department<select name="department"><option>Kitchen</option><option>Bakery</option></select></label>
-                <label class="full">Quantity Used<input type="number" name="quantity" step="0.001" min="0.001" placeholder="0.00" required></label>
-                <label class="full">Usage Notes<textarea name="reason" placeholder="e.g. Batch #45 standard usage, spilled 200g..."></textarea></label>
+                <label class="full">Quantity Used<input type="number" name="quantity" step="0.001" min="0.001" placeholder="0" required></label>
+                <label class="full" style="border:1px solid #d9dee7;border-radius:6px;padding:12px">
+                    <input type="hidden" name="include_in_costing" value="0">
+                    <input type="checkbox" name="include_in_costing" value="1" checked style="width:auto;min-height:auto;margin:0 8px 0 0">Include this usage in costing
+                    <br><span class="tiny muted">Uncheck if this stock-out is inventory tracking only.</span>
+                </label>
+                <label class="full">Usage Notes<textarea name="notes" placeholder="e.g. Batch #45 standard usage, spilled 200g...">{{ old('notes') }}</textarea></label>
             </div>
             <div class="form-actions"><a class="btn ghost" href="{{ route('dashboard') }}">Cancel</a><button class="btn primary"><i data-lucide="circle-check"></i>Confirm Usage</button></div>
         </form>

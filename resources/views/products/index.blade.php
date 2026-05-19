@@ -1,5 +1,7 @@
 <x-layouts.app title="Products | StockFlow">
     @php
+        $formatQuantity = fn ($value): string => rtrim(rtrim(number_format((float) $value, 3, '.', ','), '0'), '.');
+        $formatMoneyInput = fn ($value): string => rtrim(rtrim(number_format((float) $value, 2, '.', ''), '0'), '.');
         $categories = ['Kitchen', 'Bakery', 'Raw Material', 'Packaging'];
         $units = [
             'grams' => 'Grams',
@@ -49,7 +51,7 @@
                         <td><span class="tag">{{ $product->category }}</span></td>
                         <td>{{ $product->unit }}</td>
                         <td><strong>&#8369;{{ number_format((float) $product->price, 2) }}</strong></td>
-                        <td><strong>{{ number_format((float) $product->current_stock, 0) }} {{ $product->unit }}</strong></td>
+                        <td><strong>{{ $formatQuantity($product->current_stock) }} {{ $product->unit }}</strong></td>
                         <td>{{ $product->include_in_costing ? 'Yes' : 'No' }}</td>
                         <td><span class="badge {{ $product->status === 'In Stock' ? 'green' : ($product->status === 'Low' ? 'orange' : 'red') }}">{{ $product->status }}</span></td>
                         <td>
@@ -69,6 +71,8 @@
             </tbody>
         </table>
     </div>
+
+    <div style="margin-top:16px">{{ $products->links() }}</div>
 
     @foreach ($products as $product)
         <div id="edit-product-{{ $product->id }}" class="modal-backdrop">
@@ -97,9 +101,9 @@
                                 @endforeach
                             </select>
                         </label>
-                        <label>Price per Unit<input type="number" step="0.01" min="0" name="price" value="{{ $product->price }}" required></label>
-                        <label>Starting Stock<input type="number" step="0.001" min="0" name="starting_stock" value="{{ $product->starting_stock }}" required></label>
-                        <label>Current Stock<input type="number" step="0.001" min="0" name="current_stock" value="{{ $product->current_stock }}" required></label>
+                        <label>Price per Unit<input type="number" step="0.01" min="0" name="price" value="{{ $formatMoneyInput($product->price) }}" required></label>
+                        <label>Starting Stock<input type="number" step="0.001" min="0" name="starting_stock" value="{{ $formatQuantity($product->starting_stock) }}" required></label>
+                        <label>Current Stock<input type="number" step="0.001" min="0" name="current_stock" value="{{ $formatQuantity($product->current_stock) }}" required></label>
                         <label>Low Stock Threshold<input type="number" min="0" name="low_stock_threshold" value="{{ $product->low_stock_threshold }}" required></label>
                         <label style="border:1px solid #d9dee7;border-radius:6px;padding:12px;margin-top:20px">
                             <input type="checkbox" name="include_in_costing" value="1" @checked($product->include_in_costing) style="width:auto;min-height:auto;margin:0 8px 0 0">Include in Costing
@@ -140,9 +144,9 @@
                             @endforeach
                         </select>
                     </label>
-                    <label>Price per Unit<input type="number" step="0.01" min="0" name="price" value="0"></label>
-                    <label>Starting Stock<input type="number" step="0.001" min="0" name="starting_stock" value="0"></label>
-                    <label>Low Stock Threshold<input type="number" min="0" name="low_stock_threshold" value="10"></label>
+                    <label>Price per Unit<input type="number" step="0.01" min="0" name="price" value="{{ old('price', '0') }}"></label>
+                    <label>Starting Stock<input type="number" step="0.001" min="0" name="starting_stock" value="{{ old('starting_stock', '0') }}"></label>
+                    <label>Low Stock Threshold<input type="number" min="0" name="low_stock_threshold" value="{{ old('low_stock_threshold', '10') }}"></label>
                     <label style="border:1px solid #d9dee7;border-radius:6px;padding:12px;margin-top:20px"><input type="checkbox" name="include_in_costing" value="1" checked style="width:auto;min-height:auto;margin:0 8px 0 0">Include in Costing<br><span class="tiny muted">Will be included in financial calculations</span></label>
                     <label class="full">Notes (Optional)<textarea placeholder="Add storage instructions or details..."></textarea></label>
                 </div>

@@ -1,4 +1,8 @@
 <x-layouts.app title="Stock Movements | StockFlow" heading="Stock Movements">
+    @php
+        $formatQuantity = fn ($value): string => rtrim(rtrim(number_format((float) $value, 3, '.', ','), '0'), '.');
+    @endphp
+
     <section class="grid gap-6 xl:grid-cols-[420px_1fr]">
         <form method="POST" action="{{ route('movements.store') }}" class="rounded-lg border border-white/10 bg-white/10 p-5 backdrop-blur-xl">
             @csrf
@@ -7,7 +11,7 @@
                 <label class="text-sm">Product
                     <select name="product_id" class="mt-1 w-full rounded-lg border border-white/10 bg-slate-950/55 px-3 py-2 text-white">
                         @foreach ($products as $product)
-                            <option value="{{ $product->id }}">{{ $product->sku }} - {{ $product->name }} ({{ number_format((float) $product->current_stock, 3) }} {{ $product->unit }})</option>
+                            <option value="{{ $product->id }}">{{ $product->sku }} - {{ $product->name }} ({{ $formatQuantity($product->current_stock) }} {{ $product->unit }})</option>
                         @endforeach
                     </select>
                 </label>
@@ -55,7 +59,7 @@
                                 <td class="py-3 text-slate-300">{{ $movement->created_at->format('M d, Y H:i') }}</td>
                                 <td class="font-medium">{{ $movement->product->name }}</td>
                                 <td><span class="rounded-full px-2.5 py-1 text-xs font-medium {{ $movement->type === 'In' ? 'bg-emerald-400/15 text-emerald-200' : 'bg-amber-400/15 text-amber-200' }}">{{ $movement->type }}</span></td>
-                                <td>{{ number_format((float) $movement->quantity, 3) }} {{ $movement->product->unit }}</td>
+                                <td>{{ $formatQuantity($movement->quantity) }} {{ $movement->product->unit }}</td>
                                 <td>{{ $movement->department }}</td>
                                 <td>P{{ number_format($movement->cost, 2) }}</td>
                                 <td class="text-slate-300">{{ $movement->reason ?: 'None' }}</td>

@@ -1,7 +1,8 @@
 <x-layouts.app title="Active Inventory | StockFlow">
     @php
-        $low = $products->filter(fn ($p) => $p->status === 'Low')->count();
-        $out = $products->filter(fn ($p) => $p->status === 'Out')->count();
+        $formatQuantity = fn ($value): string => rtrim(rtrim(number_format((float) $value, 3, '.', ','), '0'), '.');
+        $low = $allProducts->filter(fn ($p) => $p->status === 'Low')->count();
+        $out = $allProducts->filter(fn ($p) => $p->status === 'Out')->count();
     @endphp
     <div class="page-head">
         <div><h1>Active Inventory</h1><div class="sub">Live tracking of your current warehouse stock levels.</div></div>
@@ -21,7 +22,7 @@
         </div>
         <table>
             <thead>
-                <tr><th>Product Details</th><th>Category</th><th>Unit</th><th>Current Stock</th><th>Unit Price</th><th>Total Value</th><th>Status</th></tr>
+                <tr><th>Product Details</th><th>Category</th><th>Unit</th><th>Current Stock</th><th>Unit Price</th><th>Total Value</th><th>In Costing</th><th>Status</th></tr>
             </thead>
             <tbody>
                 @foreach ($products as $product)
@@ -29,14 +30,17 @@
                         <td><strong>{{ $product->name }}</strong><br><span class="tiny muted">{{ $product->sku }}</span></td>
                         <td><span class="tag">{{ $product->category }}</span></td>
                         <td>{{ $product->unit }}</td>
-                        <td><strong style="font-size:16px">{{ number_format((float) $product->current_stock, 2) }}</strong></td>
-                        <td class="muted">₱{{ number_format((float) $product->price, 2) }}</td>
-                        <td class="money">₱{{ number_format($product->inventory_value, 2) }}</td>
+                        <td><strong style="font-size:16px">{{ $formatQuantity($product->current_stock) }}</strong></td>
+                        <td class="muted">&#8369;{{ number_format((float) $product->price, 2) }}</td>
+                        <td class="money">&#8369;{{ number_format($product->inventory_value, 2) }}</td>
+                        <td>{{ $product->include_in_costing ? 'Yes' : 'No' }}</td>
                         <td><span class="badge {{ $product->status === 'In Stock' ? 'green' : ($product->status === 'Low' ? 'orange' : 'red') }}">{{ $product->status }}</span></td>
                     </tr>
                 @endforeach
             </tbody>
-            <tfoot><tr><td colspan="5" style="text-align:right;font-weight:900">TOTAL INVENTORY VALUE</td><td colspan="2" class="money" style="font-size:17px">₱{{ number_format($products->sum(fn ($p) => $p->inventory_value), 2) }}</td></tr></tfoot>
+            <tfoot><tr><td colspan="5" style="text-align:right;font-weight:900">TOTAL INVENTORY VALUE</td><td colspan="3" class="money" style="font-size:17px">&#8369;{{ number_format($allProducts->sum(fn ($p) => $p->inventory_value), 2) }}</td></tr></tfoot>
         </table>
     </div>
+
+    <div style="margin-top:16px">{{ $products->links() }}</div>
 </x-layouts.app>

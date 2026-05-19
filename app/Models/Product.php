@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -55,5 +56,21 @@ class Product extends Model
     public function getInventoryValueAttribute(): float
     {
         return (float) $this->current_stock * (float) $this->price;
+    }
+
+    public function stockOnDate(CarbonInterface $date): float
+    {
+        return $this->movements()
+            ->where('created_at', '<=', $date->copy()->endOfDay())
+            ->get()
+            ->reduce(
+                fn (float $carry, StockMovement $movement): float => $carry + ($movement->type === 'In' ? (float) $movement->quantity : -1 * (float) $movement->quantity),
+                (float) $this->starting_stock
+            );
+    }
+
+    public function syncCurrentStock(): void
+    {
+        $this->update(['current_stock' => max(0, $this->stockOnDate(now()))]);
     }
 }

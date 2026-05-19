@@ -18,7 +18,7 @@ class StockMovementController extends Controller
     {
         return view('movements.index', [
             'products' => Product::query()->orderBy('name')->get(),
-            'movements' => StockMovement::query()->with(['product', 'user'])->latest()->paginate(15),
+            'movements' => StockMovement::query()->with(['product', 'user'])->latest()->paginate(10),
         ]);
     }
 
@@ -44,31 +44,50 @@ class StockMovementController extends Controller
             'quantity' => ['required', 'numeric', 'min:0.001'],
             'department' => ['required', 'string', 'max:100'],
             'reason' => ['nullable', 'string', 'max:255'],
+            'notes' => ['nullable', 'string', 'max:1000'],
             'movement_date' => ['required', 'date'],
+            'include_in_costing' => ['nullable', 'boolean'],
         ]);
 
         try {
             DB::transaction(function () use ($data): void {
                 $product = Product::query()->lockForUpdate()->findOrFail($data['product_id']);
                 $quantity = (float) $data['quantity'];
-                $current = (float) $product->current_stock;
+                $movementDate = Carbon::parse($data['movement_date']);
 
-                if ($data['type'] === 'Out' && $quantity > $current) {
-                    throw new \RuntimeException('Stock-out quantity is higher than available stock.');
+                if ($data['type'] === 'Out' && $movementDate->isToday()) {
+                    $this->reconcileCurrentStockBaseline($product);
+                    $product->refresh();
                 }
 
-                $product->update([
-                    'current_stock' => $data['type'] === 'In' ? $current + $quantity : $current - $quantity,
-                ]);
+                $availableOnDate = $product->stockOnDate($movementDate);
 
-                $movementAt = Carbon::parse($data['movement_date'])->setTimeFrom(Carbon::now());
+                if ($data['type'] === 'Out' && $movementDate->isFuture()) {
+                    throw new \RuntimeException('Stock-out date cannot be in the future.');
+                }
+
+                if ($data['type'] === 'Out' && $quantity > $availableOnDate) {
+                    throw new \RuntimeException('Stock-out quantity is higher than available stock for '.$movementDate->format('M d, Y').'. Available: '.$this->formatQuantity($availableOnDate).' '.$product->unit.'.');
+                }
+
+                $movementAt = $movementDate->copy()->setTimeFrom(Carbon::now());
                 unset($data['movement_date']);
+                $includeInCosting = array_key_exists('include_in_costing', $data)
+                    ? (bool) $data['include_in_costing']
+                    : (bool) $product->include_in_costing;
+                unset($data['include_in_costing']);
+                $unitPrice = (float) $product->price;
 
                 StockMovement::query()->create($data + [
+                    'include_in_costing' => $includeInCosting,
+                    'unit_price' => $unitPrice,
+                    'total_cost' => $data['type'] === 'Out' && $includeInCosting ? $quantity * $unitPrice : 0,
                     'user_id' => $this->systemUser()->id,
                     'created_at' => $movementAt,
                     'updated_at' => $movementAt,
                 ]);
+
+                $product->syncCurrentStock();
             });
         } catch (\RuntimeException $exception) {
             return back()->withErrors(['quantity' => $exception->getMessage()])->withInput();
@@ -77,6 +96,113 @@ class StockMovementController extends Controller
         InventoryRecord::rebuildForDate(Carbon::parse($request->input('movement_date')));
 
         return back()->with('success', $data['type'] === 'In' ? 'Stock added.' : 'Stock released.');
+    }
+
+    public function update(Request $request, StockMovement $movement): RedirectResponse
+    {
+        $data = $request->validate([
+            'product_id' => ['required', 'exists:products,id'],
+            'quantity' => ['required', 'numeric', 'min:0.001'],
+            'department' => ['required', 'string', 'max:100'],
+            'reason' => ['nullable', 'string', 'max:255'],
+            'notes' => ['nullable', 'string', 'max:1000'],
+            'movement_date' => ['required', 'date'],
+            'include_in_costing' => ['nullable', 'boolean'],
+        ]);
+
+        $oldProductId = $movement->product_id;
+        $oldDate = $movement->created_at->copy();
+        $movementDate = Carbon::parse($data['movement_date']);
+
+        try {
+            DB::transaction(function () use ($data, $movement, $movementDate, $oldProductId): void {
+                $product = Product::query()->lockForUpdate()->findOrFail($data['product_id']);
+                if ($oldProductId !== $product->id) {
+                    Product::query()->lockForUpdate()->findOrFail($oldProductId);
+                }
+
+                $quantity = (float) $data['quantity'];
+
+                if ($movement->type === 'Out' && $movementDate->isFuture()) {
+                    throw new \RuntimeException('Stock-out date cannot be in the future.');
+                }
+
+                if ($movement->type === 'Out') {
+                    if ($movementDate->isToday()) {
+                        $this->reconcileCurrentStockBaseline($product);
+                        $product->refresh();
+                    }
+
+                    $availableOnDate = $this->stockOnDateExcludingMovement($product, $movementDate, $movement);
+
+                    if ($quantity > $availableOnDate) {
+                        throw new \RuntimeException('Stock-out quantity is higher than available stock for '.$movementDate->format('M d, Y').'. Available: '.$this->formatQuantity($availableOnDate).' '.$product->unit.'.');
+                    }
+                }
+
+                $includeInCosting = array_key_exists('include_in_costing', $data)
+                    ? (bool) $data['include_in_costing']
+                    : (bool) $product->include_in_costing;
+                $unitPrice = (float) $product->price;
+
+                $movement->update([
+                    'product_id' => $product->id,
+                    'quantity' => $quantity,
+                    'department' => $data['department'],
+                    'reason' => $data['reason'] ?? null,
+                    'notes' => $data['notes'] ?? null,
+                    'include_in_costing' => $includeInCosting,
+                    'unit_price' => $unitPrice,
+                    'total_cost' => $movement->type === 'Out' && $includeInCosting ? $quantity * $unitPrice : 0,
+                    'created_at' => $movementDate->copy()->setTimeFrom($movement->created_at),
+                ]);
+
+                $product->syncCurrentStock();
+
+                if ($oldProductId !== $product->id) {
+                    Product::query()->find($oldProductId)?->syncCurrentStock();
+                }
+            });
+        } catch (\RuntimeException $exception) {
+            return back()->withErrors(['movement' => $exception->getMessage()]);
+        }
+
+        InventoryRecord::rebuildForDate($oldDate);
+        InventoryRecord::rebuildForDate($movementDate);
+
+        return back()->with('success', 'Movement updated.');
+    }
+
+    private function stockOnDateExcludingMovement(Product $product, Carbon $date, StockMovement $excludedMovement): float
+    {
+        return $product->movements()
+            ->where('stock_movements.id', '!=', $excludedMovement->id)
+            ->where('created_at', '<=', $date->copy()->endOfDay())
+            ->get()
+            ->reduce(
+                fn (float $carry, StockMovement $movement): float => $carry + ($movement->type === 'In' ? (float) $movement->quantity : -1 * (float) $movement->quantity),
+                (float) $product->starting_stock
+            );
+    }
+
+    private function reconcileCurrentStockBaseline(Product $product): void
+    {
+        $calculatedCurrent = $product->stockOnDate(now());
+        $displayedCurrent = (float) $product->current_stock;
+        $difference = round($displayedCurrent - $calculatedCurrent, 3);
+
+        if (abs($difference) < 0.001) {
+            return;
+        }
+
+        $product->update([
+            'starting_stock' => max(0, (float) $product->starting_stock + $difference),
+        ]);
+    }
+
+    private function formatQuantity(float $value): string
+    {
+        return rtrim(rtrim(number_format($value, 3, '.', ''), '0'), '.');
     }
 
     private function systemUser(): User

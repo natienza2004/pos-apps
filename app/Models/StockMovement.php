@@ -17,6 +17,10 @@ class StockMovement extends Model
         'quantity',
         'department',
         'reason',
+        'notes',
+        'include_in_costing',
+        'unit_price',
+        'total_cost',
         'user_id',
         'created_at',
         'updated_at',
@@ -26,6 +30,9 @@ class StockMovement extends Model
     {
         return [
             'quantity' => 'decimal:3',
+            'include_in_costing' => 'boolean',
+            'unit_price' => 'decimal:2',
+            'total_cost' => 'decimal:2',
         ];
     }
 
@@ -41,7 +48,15 @@ class StockMovement extends Model
 
     public function getCostAttribute(): float
     {
-        if ($this->type !== 'Out' || ! $this->product?->include_in_costing) {
+        if ($this->type !== 'Out') {
+            return 0.0;
+        }
+
+        if ($this->include_in_costing !== null) {
+            return $this->include_in_costing ? (float) $this->total_cost : 0.0;
+        }
+
+        if (! $this->product?->include_in_costing) {
             return 0.0;
         }
 

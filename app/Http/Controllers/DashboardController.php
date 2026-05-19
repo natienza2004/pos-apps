@@ -76,9 +76,19 @@ class DashboardController extends Controller
         $filteredKitchenCost = $trendMovements->where('department', 'Kitchen')->sum(fn (StockMovement $movement): float => $movement->cost);
         $filteredBakeryCost = $trendMovements->where('department', 'Bakery')->sum(fn (StockMovement $movement): float => $movement->cost);
 
+        $stockAlerts = $products
+            ->filter(fn (Product $product): bool => in_array($product->status, ['Low', 'Out'], true))
+            ->sortBy([
+                fn (Product $product): int => $product->status === 'Out' ? 0 : 1,
+                fn (Product $product): float => (float) $product->current_stock,
+                fn (Product $product): string => $product->name,
+            ])
+            ->values();
+
         return view('dashboard', [
             'totalInventoryValue' => $products->sum(fn (Product $product): float => $product->inventory_value),
-            'lowStockCount' => $products->filter(fn (Product $product): bool => in_array($product->status, ['Low', 'Out'], true))->count(),
+            'lowStockCount' => $stockAlerts->count(),
+            'stockAlerts' => $stockAlerts,
             'todaysConsumedCost' => $todaysMovements->sum(fn (StockMovement $movement): float => $movement->cost),
             'todayKitchenCost' => $todaysMovements->where('department', 'Kitchen')->sum(fn (StockMovement $movement): float => $movement->cost),
             'todayBakeryCost' => $todaysMovements->where('department', 'Bakery')->sum(fn (StockMovement $movement): float => $movement->cost),

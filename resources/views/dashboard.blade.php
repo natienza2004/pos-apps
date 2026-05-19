@@ -3,6 +3,7 @@
         $kitchen = $filteredKitchenCost;
         $bakery = $filteredBakeryCost;
         $total = max($kitchen + $bakery, 1);
+        $formatQuantity = fn ($value): string => rtrim(rtrim(number_format((float) $value, 3, '.', ','), '0'), '.');
     @endphp
     <div class="page-head">
         <div>
@@ -77,7 +78,6 @@
                 <div class="progress"><span style="width:{{ ($bakery / $total) * 100 }}%;background:#e5e7eb"></span></div>
                 <div style="display:flex;justify-content:space-between;margin:24px 0 8px"><span class="muted">TOTAL</span><strong>&#8369;{{ number_format($kitchen + $bakery, 2) }}</strong></div>
                 <div class="progress"><span style="width:100%;background:#10b981"></span></div>
-                <div style="margin-top:28px;padding:18px;border-radius:9px;background:#eafff4;border:1px solid #bbf7d0;display:flex;justify-content:space-between"><span><strong class="tiny">DAILY PROFITABILITY</strong><br><span class="muted">Target Cost Range</span></span><strong style="color:#005b3b">SAFE</strong></div>
             </div>
         </div>
     </section>
@@ -91,7 +91,7 @@
                         <tr>
                             <td style="width:48px"><span class="icon" style="background:{{ $movement->type === 'In' ? '#d1fae5' : '#fef3c7' }};color:{{ $movement->type === 'In' ? '#059669' : '#d97706' }};width:34px;height:34px"><i data-lucide="{{ $movement->type === 'In' ? 'arrow-up-right' : 'arrow-down-right' }}"></i></span></td>
                             <td><strong>{{ $movement->product->name }}</strong><br><span class="tiny muted">{{ $movement->type === 'In' ? 'Stock Arrival' : 'Used by '.$movement->department }} &bull; {{ $movement->created_at->format('h:i A') }}</span></td>
-                            <td style="text-align:right;font-weight:900;color:{{ $movement->type === 'In' ? '#00a872' : '#ea6a00' }}">{{ $movement->type === 'In' ? '+' : '-' }}{{ number_format((float) $movement->quantity, 0) }} {{ $movement->product->unit }}</td>
+                            <td style="text-align:right;font-weight:900;color:{{ $movement->type === 'In' ? '#00a872' : '#ea6a00' }}">{{ $movement->type === 'In' ? '+' : '-' }}{{ $formatQuantity($movement->quantity) }} {{ $movement->product->unit }}</td>
                         </tr>
                     @empty
                         <tr><td class="empty">No recent activity yet.</td></tr>
@@ -101,11 +101,22 @@
         </div>
         <div class="card">
             <div class="panel-head" style="background:#fff8e6;color:#92400e"><span><i data-lucide="circle-alert" style="width:15px"></i> Critical Low Stock</span></div>
-            <div class="empty">
-                @if ($lowStockCount)
-                    <div>{{ $lowStockCount }} products need restocking.</div>
+            <div class="panel-body" style="max-height:315px;overflow:auto">
+                @if ($stockAlerts->isNotEmpty())
+                    @foreach ($stockAlerts as $product)
+                        <div style="display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;padding:12px 0;border-bottom:1px solid #eef2f7">
+                            <div>
+                                <strong>{{ $product->name }}</strong>
+                                <div class="tiny muted">{{ $product->sku }} &bull; Threshold: {{ $formatQuantity($product->low_stock_threshold) }} {{ $product->unit }}</div>
+                            </div>
+                            <div style="text-align:right">
+                                <span class="badge {{ $product->status === 'Out' ? 'red' : 'orange' }}">{{ $product->status === 'Out' ? 'Out' : 'Low' }}</span>
+                                <div class="tiny" style="margin-top:6px;font-weight:900;color:{{ $product->status === 'Out' ? '#dc2626' : '#b45309' }}">{{ $formatQuantity($product->current_stock) }} {{ $product->unit }}</div>
+                            </div>
+                        </div>
+                    @endforeach
                 @else
-                    <div><i data-lucide="package" style="width:34px;height:34px;color:#d1d5db"></i><br><br>All products are within safe stock levels.</div>
+                    <div class="empty"><i data-lucide="package" style="width:34px;height:34px;color:#d1d5db"></i><br><br>All products are within safe stock levels.</div>
                 @endif
             </div>
         </div>
@@ -115,8 +126,8 @@
         const trendCanvas = document.getElementById('trendChart');
         const trendContext = trendCanvas.getContext('2d');
         const trendGradient = trendContext.createLinearGradient(0, 0, 0, 260);
-        trendGradient.addColorStop(0, 'rgba(245, 158, 11, .32)');
-        trendGradient.addColorStop(1, 'rgba(245, 158, 11, 0)');
+        trendGradient.addColorStop(0, 'rgba(0, 159, 107, .32)');
+        trendGradient.addColorStop(1, 'rgba(0, 159, 107, 0)');
 
         new Chart(trendCanvas, {
             type: 'line',
@@ -125,13 +136,13 @@
                 datasets: [{
                     label: 'Total Cost',
                     data: @json($trendCosts),
-                    borderColor: '#f59e0b',
+                    borderColor: '#009f6b',
                     backgroundColor: trendGradient,
                     fill: true,
                     borderWidth: 3,
                     pointRadius: 4,
                     pointHoverRadius: 6,
-                    pointBackgroundColor: '#f59e0b',
+                    pointBackgroundColor: '#009f6b',
                     pointBorderColor: '#ffffff',
                     pointBorderWidth: 2,
                     tension: .35

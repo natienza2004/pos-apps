@@ -21,7 +21,7 @@ class ProductController extends Controller
             ->values();
 
         return view('products.index', [
-            'products' => $products,
+            'products' => $this->paginateCollection($products, 10, $request),
             'selectedStatus' => $status,
             'nextSku' => $this->nextSku(),
         ]);
@@ -42,6 +42,18 @@ class ProductController extends Controller
     {
         $data = $this->validated($request, $product);
         $data['include_in_costing'] = $request->boolean('include_in_costing');
+
+        if (array_key_exists('current_stock', $data)) {
+            $movementDelta = $product->movements()
+                ->where('created_at', '<=', now()->endOfDay())
+                ->get()
+                ->reduce(
+                    fn (float $carry, $movement): float => $carry + ($movement->type === 'In' ? (float) $movement->quantity : -1 * (float) $movement->quantity),
+                    0.0
+                );
+
+            $data['starting_stock'] = max(0, (float) $data['current_stock'] - $movementDelta);
+        }
 
         $product->update($data);
 
@@ -74,5 +86,18 @@ class ProductController extends Controller
         $next = Product::query()->count() + 1;
 
         return 'ITM-'.str_pad((string) $next, 3, '0', STR_PAD_LEFT);
+    }
+
+    private function paginateCollection($items, int $perPage, Request $request)
+    {
+        $page = max(1, (int) $request->input('page', 1));
+
+        return new \Illuminate\Pagination\LengthAwarePaginator(
+            $items->forPage($page, $perPage)->values(),
+            $items->count(),
+            $perPage,
+            $page,
+            ['path' => $request->url(), 'query' => $request->query()]
+        );
     }
 }
